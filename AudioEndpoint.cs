@@ -125,8 +125,73 @@ namespace HeadsetBat
         void EnumAudioEndpoints(EDataFlow dataFlow, uint stateMask, out object devices);
         void GetDefaultAudioEndpoint(EDataFlow dataFlow, ERole role, out IMMDevice endpoint);
         void GetDevice([MarshalAs(UnmanagedType.LPWStr)] string id, out IMMDevice device);
-        void RegisterEndpointNotificationCallback(IntPtr client);
-        void UnregisterEndpointNotificationCallback(IntPtr client);
+        void RegisterEndpointNotificationCallback([MarshalAs(UnmanagedType.Interface)] IMMNotificationClient client);
+        void UnregisterEndpointNotificationCallback([MarshalAs(UnmanagedType.Interface)] IMMNotificationClient client);
+    }
+
+    [ComVisible(true), InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("7991EEC9-7E89-4D85-8390-6C703CEC60C0")]
+    internal interface IMMNotificationClient
+    {
+        void OnDeviceStateChanged([MarshalAs(UnmanagedType.LPWStr)] string deviceId, uint newState);
+        void OnDeviceAdded([MarshalAs(UnmanagedType.LPWStr)] string deviceId);
+        void OnDeviceRemoved([MarshalAs(UnmanagedType.LPWStr)] string deviceId);
+        void OnDefaultDeviceChanged(EDataFlow flow, ERole role, [MarshalAs(UnmanagedType.LPWStr)] string defaultDeviceId);
+        void OnPropertyValueChanged([MarshalAs(UnmanagedType.LPWStr)] string deviceId, PropertyKey key);
+    }
+
+    [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
+    internal sealed class AudioOutputWatcher : IMMNotificationClient, IDisposable
+    {
+        private readonly IMMDeviceEnumerator enumerator = (IMMDeviceEnumerator)new MMDeviceEnumerator();
+        private bool disposed;
+
+        public event Action DefaultRenderChanged;
+
+        public AudioOutputWatcher()
+        {
+            enumerator.RegisterEndpointNotificationCallback(this);
+        }
+
+        public void Dispose()
+        {
+            if (disposed)
+                return;
+
+            disposed = true;
+            try
+            {
+                try
+                {
+                    enumerator.UnregisterEndpointNotificationCallback(this);
+                }
+                catch (InvalidComObjectException)
+                {
+                    // Windows may disconnect the enumerator before application shutdown.
+                }
+            }
+            finally
+            {
+                try
+                {
+                    Marshal.FinalReleaseComObject(enumerator);
+                }
+                catch (InvalidComObjectException)
+                {
+                    // The COM object was already released by Windows.
+                }
+            }
+        }
+
+        public void OnDeviceStateChanged(string deviceId, uint newState) { }
+        public void OnDeviceAdded(string deviceId) { }
+        public void OnDeviceRemoved(string deviceId) { }
+        public void OnPropertyValueChanged(string deviceId, PropertyKey key) { }
+
+        public void OnDefaultDeviceChanged(EDataFlow flow, ERole role, string defaultDeviceId)
+        {
+            if (flow == EDataFlow.eRender && role == ERole.eMultimedia)
+                DefaultRenderChanged?.Invoke();
+        }
     }
 
     [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("D666063F-1587-4E43-81F1-B948E807363F")]

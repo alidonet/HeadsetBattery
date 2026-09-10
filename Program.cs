@@ -18,6 +18,11 @@ namespace HeadsetBat
                 Debug.Assert(MenuText.For("ru").Exit == "Выход");
                 Debug.Assert(MenuText.For("en").Settings == "Settings");
                 Debug.Assert(AppSettings.GetStartupCommand(@"C:\Program Files\HeadsetBattery\HeadsetBattery.exe") == @"""C:\Program Files\HeadsetBattery\HeadsetBattery.exe""");
+                using (var audioWatcher = new AudioOutputWatcher())
+                {
+                    Debug.Assert(audioWatcher != null);
+                }
+                Debug.Assert(BluetoothHeadsets.CreateConnectedDeviceWatcher() != null);
                 using (TrayIconFactory.CreateSpeaker())
                 using (TrayIconFactory.CreateNoAudioOutput())
                 using (TrayIconFactory.CreateHeadphones(100, false))

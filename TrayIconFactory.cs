@@ -1,7 +1,9 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
+using Microsoft.Win32;
 
 namespace HeadsetBat
 {
@@ -11,55 +13,72 @@ namespace HeadsetBat
         private const string HeadsetGlyph = "headset";
         private const string SpeakerGlyph = "volume-2";
         private const string HeadphoneOffGlyph = "headphone-off";
-        private const int HeadphonesBottom = 14;
-        private const int HeadsetBottom = 14;
-        private static readonly Color Background = Color.FromArgb(74, 74, 74);
-        private static readonly Color Glyph = Color.FromArgb(248, 241, 227);
-        private static readonly Color ChargedGlyph = Color.FromArgb(0, 230, 118);
-        private static readonly Color Badge = Color.FromArgb(0, 120, 212);
-        private static readonly Color LowBattery = Color.FromArgb(255, 59, 48);
+        private const int HeadphonesBottom = 15;
+        private const int HeadsetBottom = 15;
+        private const float GlyphStrokeWidth = 1.4f;
+        private static readonly IconColors DarkTrayColors = new IconColors(
+            Color.FromArgb(248, 241, 227), Color.FromArgb(248, 241, 227), Color.FromArgb(90, 200, 250),
+            Color.FromArgb(0, 230, 118), Color.FromArgb(255, 59, 48), Color.FromArgb(0, 120, 212), true);
+        private static readonly IconColors LightTrayColors = new IconColors(
+            Color.FromArgb(43, 43, 43), Color.FromArgb(96, 96, 96), Color.FromArgb(0, 91, 166),
+            Color.FromArgb(0, 128, 67), Color.FromArgb(184, 34, 34), Color.FromArgb(0, 82, 153), false);
 
-        public static Icon CreateSpeaker() => CreateGlyph(SpeakerGlyph);
+        public static Icon CreateSpeaker()
+        {
+            var colors = GetColors();
+            return CreateIcon(graphics =>
+            {
+                graphics.Clear(Color.Transparent);
+                DrawGlyph(graphics, SpeakerGlyph, colors.Speaker);
+            }, colors.StrengthenEdges);
+        }
+
         public static Icon CreateHeadphones(byte? batteryPercent, bool showPercent) => CreateGlyph(HeadphonesGlyph, batteryPercent, showPercent);
         public static Icon CreateHeadset(byte? batteryPercent, bool showPercent) => CreateGlyph(HeadsetGlyph, batteryPercent, showPercent);
-        public static Icon CreateNoAudioOutput() => CreateIcon(graphics =>
+
+        public static Icon CreateNoAudioOutput()
         {
-            graphics.Clear(Background);
-            DrawGlyph(graphics, HeadphoneOffGlyph, LowBattery);
-        });
+            var colors = GetColors();
+            return CreateIcon(graphics =>
+            {
+                graphics.Clear(Color.Transparent);
+                DrawGlyph(graphics, HeadphoneOffGlyph, colors.LowBattery);
+            }, colors.StrengthenEdges);
+        }
 
         private static Icon CreateGlyph(string glyph, byte? batteryPercent = null, bool showPercent = false)
         {
+            var colors = GetColors();
             return CreateIcon(graphics =>
             {
-                graphics.Clear(Background);
+                graphics.Clear(Color.Transparent);
                 if (!batteryPercent.HasValue || showPercent)
                 {
-                    DrawGlyph(graphics, glyph, Glyph);
+                    DrawGlyph(graphics, glyph, showPercent && batteryPercent.HasValue ? colors.GlyphWithPercent : colors.Glyph);
                     if (batteryPercent.HasValue)
-                        DrawPercentBadge(graphics, batteryPercent.Value);
+                        DrawPercentBadge(graphics, batteryPercent.Value, colors);
                 }
                 else if (batteryPercent.Value <= 30)
                 {
-                    DrawGlyph(graphics, glyph, LowBattery);
+                    DrawGlyph(graphics, glyph, colors.LowBattery);
                 }
                 else
                 {
-                    DrawGlyph(graphics, glyph, Glyph);
+                    DrawGlyph(graphics, glyph, colors.Glyph);
                     var state = graphics.Save();
                     try
                     {
                         var glyphBottom = glyph == HeadphonesGlyph ? HeadphonesBottom : HeadsetBottom;
                         var chargedTop = GetChargedTop(glyphBottom, batteryPercent.Value);
                         graphics.SetClip(new Rectangle(0, chargedTop, 16, glyphBottom - chargedTop + 1));
-                        DrawGlyph(graphics, glyph, ChargedGlyph);
+                        DrawGlyph(graphics, glyph, colors.Charged);
                     }
                     finally
                     {
                         graphics.Restore(state);
                     }
                 }
-            });
+            }, colors.StrengthenEdges);
         }
 
         private static void DrawGlyph(Graphics graphics, string glyph, Color color)
@@ -67,9 +86,10 @@ namespace HeadsetBat
             var state = graphics.Save();
             try
             {
-                graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                // Rendering is supersampled; final downscaling provides the only antialiasing pass.
+                graphics.SmoothingMode = SmoothingMode.None;
                 graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
-                using (var pen = new Pen(color, 1.2f) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
+                using (var pen = new Pen(color, GlyphStrokeWidth) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
                 {
                     if (glyph == HeadsetGlyph)
                         DrawHeadsetGlyph(graphics, pen);
@@ -195,8 +215,46 @@ namespace HeadsetBat
             graphics.DrawArc(pen, Rect(4, 3, 18, 18), -45, 90);
         }
 
-        private static PointF Point(float x, float y) => new PointF(0.8f + x * 0.6f, 0.8f + y * 0.6f);
-        private static RectangleF Rect(float x, float y, float width, float height) => new RectangleF(0.8f + x * 0.6f, 0.8f + y * 0.6f, width * 0.6f, height * 0.6f);
+        private static PointF Point(float x, float y) => new PointF(x * 0.625f + 0.5f, y * 0.625f + 0.5f);
+        private static RectangleF Rect(float x, float y, float width, float height) => new RectangleF(x * 0.625f + 0.5f, y * 0.625f + 0.5f, width * 0.625f, height * 0.625f);
+
+        private static IconColors GetColors()
+        {
+            try
+            {
+                using (var personalize = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"))
+                {
+                    var systemUsesLightTheme = personalize?.GetValue("SystemUsesLightTheme") as int?;
+                    return systemUsesLightTheme.GetValueOrDefault() != 0 ? LightTrayColors : DarkTrayColors;
+                }
+            }
+            catch
+            {
+                return DarkTrayColors;
+            }
+        }
+
+        private readonly struct IconColors
+        {
+            public IconColors(Color glyph, Color glyphWithPercent, Color speaker, Color charged, Color lowBattery, Color badge, bool strengthenEdges)
+            {
+                Glyph = glyph;
+                GlyphWithPercent = glyphWithPercent;
+                Speaker = speaker;
+                Charged = charged;
+                LowBattery = lowBattery;
+                Badge = badge;
+                StrengthenEdges = strengthenEdges;
+            }
+
+            public Color Glyph { get; }
+            public Color GlyphWithPercent { get; }
+            public Color Speaker { get; }
+            public Color Charged { get; }
+            public Color LowBattery { get; }
+            public Color Badge { get; }
+            public bool StrengthenEdges { get; }
+        }
 
         private static int GetChargedTop(int glyphBottom, byte percent)
         {
@@ -205,9 +263,9 @@ namespace HeadsetBat
             return glyphBottom - chargedRows + 1;
         }
 
-        private static void DrawPercentBadge(Graphics graphics, byte percent)
+        private static void DrawPercentBadge(Graphics graphics, byte percent, IconColors colors)
         {
-            using (var brush = new SolidBrush(percent <= 30 ? LowBattery : Badge))
+            using (var brush = new SolidBrush(percent <= 30 ? colors.LowBattery : colors.Badge))
             using (var textBrush = new SolidBrush(Color.White))
             using (var font = new Font("Segoe UI", 5.5f, FontStyle.Bold, GraphicsUnit.Pixel))
             using (var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
@@ -218,12 +276,12 @@ namespace HeadsetBat
             }
         }
 
-        private static Icon CreateIcon(Action<Graphics> draw)
+        private static Icon CreateIcon(Action<Graphics> draw, bool strengthenEdges)
         {
             const int scale = 4;
-            using (var source = new Bitmap(16 * scale, 16 * scale))
+            using (var source = new Bitmap(16 * scale, 16 * scale, PixelFormat.Format32bppArgb))
             using (var sourceGraphics = Graphics.FromImage(source))
-            using (var bitmap = new Bitmap(16, 16))
+            using (var bitmap = new Bitmap(16, 16, PixelFormat.Format32bppArgb))
             using (var graphics = Graphics.FromImage(bitmap))
             {
                 sourceGraphics.ScaleTransform(scale, scale);
@@ -231,6 +289,8 @@ namespace HeadsetBat
                 graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
                 graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
                 graphics.DrawImage(source, new Rectangle(0, 0, 16, 16));
+                if (strengthenEdges)
+                    StrengthenTransparentEdges(bitmap);
                 var handle = bitmap.GetHicon();
                 try
                 {
@@ -244,6 +304,19 @@ namespace HeadsetBat
             }
         }
 
+        private static void StrengthenTransparentEdges(Bitmap bitmap)
+        {
+            for (var y = 0; y < bitmap.Height; y++)
+            for (var x = 0; x < bitmap.Width; x++)
+            {
+                var pixel = bitmap.GetPixel(x, y);
+                if (pixel.A > 0 && pixel.A < 255)
+                {
+                    var alpha = (int)Math.Round(255 * Math.Pow(pixel.A / 255.0, 0.75));
+                    bitmap.SetPixel(x, y, Color.FromArgb(alpha, pixel.R, pixel.G, pixel.B));
+                }
+            }
+        }
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool DestroyIcon(IntPtr handle);

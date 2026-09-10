@@ -82,6 +82,12 @@ namespace HeadsetBat
             return result.OrderBy(x => x.Name).ToArray();
         }
 
+        public static DeviceWatcher CreateConnectedDeviceWatcher()
+        {
+            var selector = BluetoothDevice.GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus.Connected);
+            return DeviceInformation.CreateWatcher(selector, RequestedProperties);
+        }
+
         private static void ApplyHfpBattery(IEnumerable<Headset> headsets)
         {
             foreach (var battery in HfpBatteryReader.ReadConnected())

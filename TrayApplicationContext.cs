@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using Windows.Devices.Enumeration;
 
 namespace HeadsetBat
 {
@@ -16,8 +17,12 @@ namespace HeadsetBat
         private static readonly MenuText Texts = MenuText.For(CultureInfo.CurrentUICulture.TwoLetterISOLanguageName);
         private readonly NotifyIcon trayIcon;
         private readonly ContextMenuStrip menu = new ContextMenuStrip();
-        private readonly Timer refreshTimer = new Timer { Interval = 10000 };
+        private readonly Control dispatcher = new Control();
+        private readonly Timer refreshTimer = new Timer { Interval = 60000 };
+        private AudioOutputWatcher audioOutputWatcher;
+        private DeviceWatcher bluetoothWatcher;
         private bool refreshing;
+        private bool refreshRequested;
         private bool showBatteryPercent = AppSettings.LoadShowBatteryPercentage();
         private bool startWithWindows = AppSettings.IsStartWithWindowsEnabled();
         private IReadOnlyList<Headset> headsets = Array.Empty<Headset>();
@@ -31,8 +36,15 @@ namespace HeadsetBat
                 Visible = true,
                 Icon = TrayIconFactory.CreateSpeaker()
             };
+            dispatcher.CreateControl();
             menu.Opening += async (_, __) => await RefreshAsync();
+            trayIcon.MouseClick += (_, args) =>
+            {
+                if (args.Button == MouseButtons.Left)
+                    menu.Show(Cursor.Position);
+            };
             refreshTimer.Tick += async (_, __) => await RefreshAsync();
+            StartSystemWatchers();
             refreshTimer.Start();
             _ = RefreshAsync();
         }
@@ -40,31 +52,98 @@ namespace HeadsetBat
         private async Task RefreshAsync()
         {
             if (refreshing)
+            {
+                refreshRequested = true;
                 return;
+            }
 
-            refreshing = true;
-            AudioOutput output = null;
-            var audioOutputKnown = false;
+            do
+            {
+                refreshRequested = false;
+                refreshing = true;
+                AudioOutput output = null;
+                var audioOutputKnown = false;
+                try
+                {
+                    output = AudioEndpoint.GetDefaultRender();
+                    audioOutputKnown = true;
+                    headsets = await BluetoothHeadsets.GetConnectedAsync();
+                    var activeHeadset = output == null ? null : headsets.FirstOrDefault(x => x.ContainerId == output.ContainerId);
+                    SetIcon(activeHeadset, output);
+                    RebuildMenu(activeHeadset, output);
+                }
+                catch (Exception error)
+                {
+                    if (audioOutputKnown)
+                        SetIcon(null, output);
+                    SetToolTip("Headset Battery: " + error.Message);
+                    RebuildMenu(null, output);
+                }
+                finally
+                {
+                    refreshing = false;
+                }
+            }
+            while (refreshRequested);
+        }
+
+        private void StartSystemWatchers()
+        {
             try
             {
-                output = AudioEndpoint.GetDefaultRender();
-                audioOutputKnown = true;
-                headsets = await BluetoothHeadsets.GetConnectedAsync();
-                var activeHeadset = output == null ? null : headsets.FirstOrDefault(x => x.ContainerId == output.ContainerId);
-                SetIcon(activeHeadset, output);
-                RebuildMenu(activeHeadset, output);
+                audioOutputWatcher = new AudioOutputWatcher();
+                audioOutputWatcher.DefaultRenderChanged += RequestRefresh;
             }
-            catch (Exception error)
+            catch
             {
-                if (audioOutputKnown)
-                    SetIcon(null, output);
-                SetToolTip("Headset Battery: " + error.Message);
-                RebuildMenu(null, output);
+                audioOutputWatcher?.Dispose();
+                audioOutputWatcher = null;
             }
-            finally
+
+            try
             {
-                refreshing = false;
+                bluetoothWatcher = BluetoothHeadsets.CreateConnectedDeviceWatcher();
+                bluetoothWatcher.Added += OnBluetoothDeviceAdded;
+                bluetoothWatcher.Updated += OnBluetoothDeviceUpdated;
+                bluetoothWatcher.Removed += OnBluetoothDeviceRemoved;
+                bluetoothWatcher.Start();
             }
+            catch
+            {
+                StopBluetoothWatcher();
+            }
+        }
+
+        private void RequestRefresh()
+        {
+            if (dispatcher.IsDisposed || !dispatcher.IsHandleCreated)
+                return;
+
+            try
+            {
+                dispatcher.BeginInvoke((Action)(() => _ = RefreshAsync()));
+            }
+            catch (InvalidOperationException)
+            {
+                // The application is shutting down.
+            }
+        }
+
+        private void OnBluetoothDeviceAdded(DeviceWatcher sender, DeviceInformation args) => RequestRefresh();
+        private void OnBluetoothDeviceUpdated(DeviceWatcher sender, DeviceInformationUpdate args) => RequestRefresh();
+        private void OnBluetoothDeviceRemoved(DeviceWatcher sender, DeviceInformationUpdate args) => RequestRefresh();
+
+        private void StopBluetoothWatcher()
+        {
+            if (bluetoothWatcher == null)
+                return;
+
+            bluetoothWatcher.Added -= OnBluetoothDeviceAdded;
+            bluetoothWatcher.Updated -= OnBluetoothDeviceUpdated;
+            bluetoothWatcher.Removed -= OnBluetoothDeviceRemoved;
+            if (bluetoothWatcher.Status == DeviceWatcherStatus.Started || bluetoothWatcher.Status == DeviceWatcherStatus.EnumerationCompleted)
+                bluetoothWatcher.Stop();
+            bluetoothWatcher = null;
         }
 
         private void SetIcon(Headset activeHeadset, AudioOutput output)
@@ -164,6 +243,9 @@ namespace HeadsetBat
         protected override void ExitThreadCore()
         {
             refreshTimer.Stop();
+            StopBluetoothWatcher();
+            audioOutputWatcher?.Dispose();
+            dispatcher.Dispose();
             trayIcon.Visible = false;
             trayIcon.Icon?.Dispose();
             trayIcon.Dispose();
