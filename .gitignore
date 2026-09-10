@@ -32,3 +32,5 @@ node_modules/
 # Operating-system metadata
 .DS_Store
 Thumbs.db
+# Temporary visual previews
+headset-preview.png

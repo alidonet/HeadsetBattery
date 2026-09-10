@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <LangVersion>8.0</LangVersion>
+    <RootNamespace>HeadsetBat</RootNamespace>
+    <AssemblyName>HeadsetBattery</AssemblyName>
+    <ApplicationIcon>Assets\HeadsetBattery.ico</ApplicationIcon>
+    <AssemblyTitle>Headset Battery Monitor</AssemblyTitle>
+    <Description>Bluetooth headset battery monitor</Description>
+    <Product>Headset Battery Monitor</Product>
+    <Company>github.com/alidonet</Company>
+    <Copyright>© 2026 github.com/alidonet</Copyright>
+    <Version>26.9.11.0</Version>
+    <AssemblyVersion>26.9.11.0</AssemblyVersion>
+    <FileVersion>26.9.11.0</FileVersion>
+    <InformationalVersion>260911</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- WinRT contracts: works in a normal, unpackaged WinForms process. -->
+    <PackageReference Include="Microsoft.Windows.SDK.Contracts" Version="10.0.22000.194" />
+  </ItemGroup>
+</Project>
