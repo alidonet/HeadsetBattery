@@ -1,0 +1,34 @@
+# Build outputs
+[Bb]in/
+[Oo]bj/
+build/
+dist/
+out/
+coverage/
+TestResults/
+
+# Restored dependencies
+node_modules/
+
+# IDE and editor state
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.swp
+*.swo
+*~
+
+# Local configuration and diagnostics
+.env
+.env.*
+!.env.example
+*.log
+*.tmp
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
