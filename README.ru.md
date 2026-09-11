@@ -1,7 +1,7 @@
 # Headset Battery
 
 <p align="center">
-  <img src="Assets/Logo.png" width="128" alt="Headset Battery Monitor logo">
+  <img src="Assets/Logo_anim2.gif" width="128" style="max-width: 100%; height: auto;" alt="Headset Battery Monitor logo">
 </p>
 
 [English](README.md)
