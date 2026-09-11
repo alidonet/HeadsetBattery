@@ -1,7 +1,7 @@
 # Headset Battery
 
 <p align="center">
-  <img src="Assets/Logo_anim2.gif" width="128" style="max-width: 100%; height: auto;" alt="Headset Battery Monitor logo">
+  <img src="Assets/Logo_anim2.gif" style="max-width: 100%; height: auto; display: block;" alt="Headset Battery Monitor">
 </p>
 
 [English](README.md)
@@ -12,7 +12,9 @@
 
 ## Возможности
 
-![Headset Battery в области уведомлений Windows](Assets/live.png)
+<p align="center">
+  <img src="Assets/live.png" alt="Headset Battery в области уведомлений Windows">
+</p>
 
 - Определяет текущее устройство вывода Windows: динамики, Bluetooth-наушники или гарнитуру в режиме Hands-Free.
 - Показывает соответствующий глиф в трее. Для наушников и гарнитуры заряд отображается заполнением глифа: зелёным при нормальном уровне и красным при уровне 30% или ниже.

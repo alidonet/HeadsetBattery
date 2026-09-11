@@ -1,7 +1,7 @@
 # Headset Battery
 
 <p align="center">
-  <img src="Assets/Logo_anim2.gif" width="128" style="max-width: 100%; height: auto;" alt="Headset Battery Monitor logo">
+  <img src="Assets/Logo_anim2.gif" style="max-width: 100%; height: auto; display: block;" alt="Headset Battery Monitor logo">
 </p>
 
 [Русский](README.ru.md)
@@ -12,7 +12,9 @@ No installation is required: unpack the release archive and run `HeadsetBattery.
 
 ## Features
 
-![Headset Battery in the Windows notification area](Assets/live.png)
+<p align="center">
+  <img src="Assets/live.png" alt="Headset Battery in the Windows notification area">
+</p>
 
 - Detects the active Windows audio output: speakers, Bluetooth headphones, or a headset in Hands-Free mode.
 - Shows the matching tray glyph. For headphones and headsets, the glyph fill is green at a normal level and red at 30% or below.
