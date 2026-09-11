@@ -12,6 +12,7 @@ namespace HeadsetBat
         private const string LowBatteryNotificationsValue = "LowBatteryNotifications";
         private const string LanguageValue = "Language";
         private const string TrayThemeValue = "TrayTheme";
+        private const string TrackOtherBluetoothDevicesValue = "TrackOtherBluetoothDevices";
         private const string StartupKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
         private const string StartupValue = "HeadsetBattery";
 
@@ -77,6 +78,25 @@ namespace HeadsetBat
             using (var key = Registry.CurrentUser.CreateSubKey(SettingsKeyPath))
                 key.SetValue(LowBatteryNotificationsValue, enabled ? 1 : 0, RegistryValueKind.DWord);
         }
+        public static bool LoadTrackOtherBluetoothDevices()
+        {
+            try
+            {
+                using (var key = Registry.CurrentUser.OpenSubKey(SettingsKeyPath))
+                    return key?.GetValue(TrackOtherBluetoothDevicesValue) is int value && value != 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public static void SaveTrackOtherBluetoothDevices(bool enabled)
+        {
+            using (var key = Registry.CurrentUser.CreateSubKey(SettingsKeyPath))
+                key.SetValue(TrackOtherBluetoothDevicesValue, enabled ? 1 : 0, RegistryValueKind.DWord);
+        }
+
         public static string LoadLanguage()
         {
             try
@@ -104,7 +124,8 @@ namespace HeadsetBat
 
         private static bool IsSupportedLanguage(string language) =>
             language == "en" || language == "ru" || language == "de" ||
-            language == "es" || language == "fr" || language == "zh";
+            language == "es" || language == "fr" || language == "zh" ||
+            language == "pt" || language == "ja" || language == "ko";
 
         public static TrayTheme LoadTrayTheme()
         {

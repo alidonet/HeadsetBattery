@@ -12,12 +12,18 @@ No installation is required: unpack the release archive and run `HeadsetBattery.
 
 ## Features
 
+![Headset Battery in the Windows notification area](Assets/live.png)
+
 - Detects the active Windows audio output: speakers, Bluetooth headphones, or a headset in Hands-Free mode.
 - Shows the matching tray glyph. For headphones and headsets, the glyph fill is green at a normal level and red at 30% or below.
 - Can show the exact percentage in a coloured badge instead of the fill; the option is available in Settings.
 - Lists detected connected Bluetooth audio devices, their available battery levels, and marks the active device in the context menu.
+- Optionally tracks other connected Bluetooth and BLE devices, such as mice or keyboards, when Windows exposes their battery level; they appear in a separate menu section.
 - Reads data supplied by Windows for classic HFP headsets, the system battery property, and, when available, the standard BLE Battery Service.
-- Saves user preferences and supports per-user startup with Windows.
+- Lets you choose a low-battery threshold (40%, 30%, 20%, or 10%) and shows independent connection and low-battery notifications for each device. Charging devices do not trigger low-battery alerts.
+- Uses the Windows accent colour for devices at or below the selected threshold.
+- Offers automatic, light, and dark tray-icon themes, and opens its menu with either mouse button.
+- Saves user preferences, supports per-user startup with Windows, and permits only one running instance.
 - Localizes the menu to the Windows display language: Russian, German, Spanish, French, or Chinese; English is used as a fallback.
 
 ## Compatibility

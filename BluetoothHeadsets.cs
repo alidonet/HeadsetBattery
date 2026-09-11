@@ -25,6 +25,7 @@ namespace HeadsetBat
         public Guid ContainerId { get; set; }
         public byte? BatteryPercent { get; set; }
         public bool IsCharging { get; set; }
+        public bool IsAudioDevice { get; set; }
         public IReadOnlyList<byte> BatteryLevels { get; private set; } = Array.Empty<byte>();
 
         public void SetBatteryLevels(IEnumerable<byte> levels)
@@ -53,7 +54,7 @@ namespace HeadsetBat
             "System.Devices.ChargingState"
         };
 
-        public static async Task<IReadOnlyList<Headset>> GetConnectedAsync()
+        public static async Task<IReadOnlyList<Headset>> GetConnectedAsync(bool includeOtherDevices = false)
         {
             var selector = BluetoothDevice.GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus.Connected);
             var devices = await DeviceInformation.FindAllAsync(selector, RequestedProperties).AsTask();
@@ -65,18 +66,21 @@ namespace HeadsetBat
                 {
                     using (var device = await BluetoothDevice.FromIdAsync(info.Id).AsTask())
                     {
-                        if (device?.ClassOfDevice == null ||
-                            device.ClassOfDevice.MajorClass != BluetoothMajorClass.AudioVideo ||
-                            !Headset.IsHeadset((BluetoothMinor)device.ClassOfDevice.MinorClass) ||
-                            !TryGetContainerId(info, out var containerId))
+                        if (!TryGetContainerId(info, out var containerId))
+                            continue;
+
+                        var isAudio = device?.ClassOfDevice?.MajorClass == BluetoothMajorClass.AudioVideo &&
+                                      Headset.IsHeadset((BluetoothMinor)device.ClassOfDevice.MinorClass);
+                        if (!isAudio && !includeOtherDevices)
                             continue;
 
                         result.Add(new Headset
                         {
-                            Name = string.IsNullOrWhiteSpace(info.Name) ? device.Name : info.Name,
+                            Name = string.IsNullOrWhiteSpace(info.Name) ? device?.Name : info.Name,
                             ContainerId = containerId,
                             BatteryPercent = GetBattery(info),
-                            IsCharging = IsCharging(info)
+                            IsCharging = IsCharging(info),
+                            IsAudioDevice = isAudio
                         });
                     }
                 }
@@ -85,6 +89,9 @@ namespace HeadsetBat
                     // A connected Bluetooth endpoint is not necessarily a BluetoothDevice object.
                 }
             }
+
+            if (includeOtherDevices)
+                await AddConnectedBleDevicesAsync(result);
 
             ApplyHfpBattery(result);
             var batteryByContainer = await GetBleBatteryLevelsAsync(new HashSet<Guid>(result.Select(x => x.ContainerId)));
@@ -98,15 +105,46 @@ namespace HeadsetBat
                     headset.SetBatteryLevels(battery.Levels);
             }
 
-            return result.OrderBy(x => x.Name).ToArray();
+            return result.Where(x => x.IsAudioDevice || x.BatteryPercent.HasValue).OrderBy(x => x.Name).ToArray();
         }
 
+        private static async Task AddConnectedBleDevicesAsync(ICollection<Headset> result)
+        {
+            try
+            {
+                var selector = BluetoothLEDevice.GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus.Connected);
+                var devices = await DeviceInformation.FindAllAsync(selector, RequestedProperties).AsTask();
+                foreach (var info in devices)
+                {
+                    if (!TryGetContainerId(info, out var containerId) || result.Any(x => x.ContainerId == containerId))
+                        continue;
+
+                    result.Add(new Headset
+                    {
+                        Name = info.Name,
+                        ContainerId = containerId,
+                        BatteryPercent = GetBattery(info),
+                        IsCharging = IsCharging(info),
+                        IsAudioDevice = false
+                    });
+                }
+            }
+            catch
+            {
+                // BLE devices are optional: the classic Bluetooth list remains available.
+            }
+        }
         public static DeviceWatcher CreateConnectedDeviceWatcher()
         {
             var selector = BluetoothDevice.GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus.Connected);
             return DeviceInformation.CreateWatcher(selector, RequestedProperties);
         }
 
+        public static DeviceWatcher CreateConnectedBleDeviceWatcher()
+        {
+            var selector = BluetoothLEDevice.GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus.Connected);
+            return DeviceInformation.CreateWatcher(selector, RequestedProperties);
+        }
         private static void ApplyHfpBattery(IEnumerable<Headset> headsets)
         {
             foreach (var battery in HfpBatteryReader.ReadConnected())
@@ -173,6 +211,7 @@ namespace HeadsetBat
         {
             public List<byte> Levels { get; } = new List<byte>();
             public bool IsCharging { get; set; }
+        public bool IsAudioDevice { get; set; }
         }
 
         private static async Task<List<byte>> ReadBleBatteryLevelsAsync(string deviceId)        {

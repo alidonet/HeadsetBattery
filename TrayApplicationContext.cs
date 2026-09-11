@@ -12,7 +12,7 @@ namespace HeadsetBat
 {
     internal sealed class TrayApplicationContext : ApplicationContext
     {
-        private const string BuildVersion = "1.0.2";
+        private const string BuildVersion = "1.1.0";
         private const string InactiveDeviceIndent = "\u00A0\u00A0\u00A0\u00A0";
         private static readonly TimeSpan LowBatteryNotificationCooldown = TimeSpan.FromMinutes(3);
         private static readonly Font VersionFont = new Font(SystemFonts.MenuFont, FontStyle.Bold);
@@ -28,6 +28,7 @@ namespace HeadsetBat
         private readonly Timer refreshTimer = new Timer { Interval = 60000 };
         private AudioOutputWatcher audioOutputWatcher;
         private DeviceWatcher bluetoothWatcher;
+        private DeviceWatcher bluetoothLeWatcher;
         private bool refreshing;
         private bool refreshRequested;
         private bool suppressNextMenuOpening;
@@ -36,11 +37,10 @@ namespace HeadsetBat
         private byte lowBatteryThreshold = AppSettings.LoadLowBatteryThreshold();
         private bool lowBatteryNotifications = AppSettings.LoadLowBatteryNotifications();
         private TrayTheme trayTheme = AppSettings.LoadTrayTheme();
+        private bool trackOtherBluetoothDevices = AppSettings.LoadTrackOtherBluetoothDevices();
         private readonly HashSet<Guid> connectedHeadsetIds = new HashSet<Guid>();
         private bool connectedHeadsetsKnown;
-        private Guid notificationContainerId;
-        private int? lastNotificationMilestone;
-        private DateTime lastNotificationUtc = DateTime.MinValue;
+        private readonly Dictionary<Guid, LowBatteryNotificationState> lowBatteryNotificationStates = new Dictionary<Guid, LowBatteryNotificationState>();
         private IReadOnlyList<Headset> headsets = Array.Empty<Headset>();
 
         public TrayApplicationContext()
@@ -110,8 +110,9 @@ namespace HeadsetBat
                 {
                     output = AudioEndpoint.GetDefaultRender();
                     audioOutputKnown = true;
-                    headsets = await BluetoothHeadsets.GetConnectedAsync();
+                    headsets = await BluetoothHeadsets.GetConnectedAsync(trackOtherBluetoothDevices);
                     NotifyConnectedHeadsets();
+                    UpdateLowBatteryNotifications();
                     var activeHeadset = output == null ? null : headsets.FirstOrDefault(x => x.ContainerId == output.ContainerId);
                     SetIcon(activeHeadset, output);
                     RebuildMenu(activeHeadset, output);
@@ -156,6 +157,19 @@ namespace HeadsetBat
             {
                 StopBluetoothWatcher();
             }
+
+            try
+            {
+                bluetoothLeWatcher = BluetoothHeadsets.CreateConnectedBleDeviceWatcher();
+                bluetoothLeWatcher.Added += OnBluetoothDeviceAdded;
+                bluetoothLeWatcher.Updated += OnBluetoothDeviceUpdated;
+                bluetoothLeWatcher.Removed += OnBluetoothDeviceRemoved;
+                bluetoothLeWatcher.Start();
+            }
+            catch
+            {
+                StopBluetoothLeWatcher();
+            }
         }
 
         private void RequestRefresh()
@@ -190,6 +204,18 @@ namespace HeadsetBat
             bluetoothWatcher = null;
         }
 
+        private void StopBluetoothLeWatcher()
+        {
+            if (bluetoothLeWatcher == null)
+                return;
+
+            bluetoothLeWatcher.Added -= OnBluetoothDeviceAdded;
+            bluetoothLeWatcher.Updated -= OnBluetoothDeviceUpdated;
+            bluetoothLeWatcher.Removed -= OnBluetoothDeviceRemoved;
+            if (bluetoothLeWatcher.Status == DeviceWatcherStatus.Started || bluetoothLeWatcher.Status == DeviceWatcherStatus.EnumerationCompleted)
+                bluetoothLeWatcher.Stop();
+            bluetoothLeWatcher = null;
+        }
         private void SetIcon(Headset activeHeadset, AudioOutput output)
         {
             var oldIcon = trayIcon.Icon;
@@ -211,47 +237,46 @@ namespace HeadsetBat
                     : $"{(output.IsHandsFree ? "Headset" : "Headphones")}: {activeHeadset.Name}" +
                       (activeHeadset.BatteryPercent.HasValue ? $" — {Texts.Battery}: {activeHeadset.BatteryPercent}%" : string.Empty) + (activeHeadset.IsCharging ? ", " + Texts.Charging : string.Empty));
 
-            UpdateLowBatteryNotification(activeHeadset);
         }
 
-        private void UpdateLowBatteryNotification(Headset activeHeadset)
+        private void UpdateLowBatteryNotifications()
         {
-            if (activeHeadset == null || activeHeadset.ContainerId == Guid.Empty)
+            var currentIds = new HashSet<Guid>(headsets.Where(x => x.ContainerId != Guid.Empty).Select(x => x.ContainerId));
+            foreach (var containerId in lowBatteryNotificationStates.Keys.Where(x => !currentIds.Contains(x)).ToArray())
+                lowBatteryNotificationStates.Remove(containerId);
+
+            foreach (var headset in headsets)
+                UpdateLowBatteryNotification(headset);
+        }
+
+        private void UpdateLowBatteryNotification(Headset headset)
+        {
+            if (headset == null || headset.ContainerId == Guid.Empty || !lowBatteryNotifications || headset.IsCharging || !headset.BatteryPercent.HasValue)
             {
-                ResetLowBatteryNotification();
+                if (headset != null && headset.IsCharging)
+                    lowBatteryNotificationStates.Remove(headset.ContainerId);
                 return;
             }
 
-            if (notificationContainerId != activeHeadset.ContainerId)
-            {
-                notificationContainerId = activeHeadset.ContainerId;
-                lastNotificationMilestone = null;
-                lastNotificationUtc = DateTime.MinValue;
-            }
+            if (!lowBatteryNotificationStates.TryGetValue(headset.ContainerId, out var state))
+                lowBatteryNotificationStates[headset.ContainerId] = state = new LowBatteryNotificationState();
 
-            if (!lowBatteryNotifications || activeHeadset.IsCharging || !activeHeadset.BatteryPercent.HasValue)
-            {
-                if (activeHeadset.IsCharging)
-                    lastNotificationMilestone = null;
-                return;
-            }
-
-            var battery = activeHeadset.BatteryPercent.Value;
+            var battery = headset.BatteryPercent.Value;
             if (battery > lowBatteryThreshold)
             {
-                lastNotificationMilestone = null;
+                state.LastMilestone = null;
                 return;
             }
 
             var milestone = lowBatteryThreshold - (lowBatteryThreshold - battery) / 10 * 10;
             if (milestone < 10 ||
-                lastNotificationMilestone.HasValue && milestone >= lastNotificationMilestone.Value ||
-                DateTime.UtcNow - lastNotificationUtc < LowBatteryNotificationCooldown)
+                state.LastMilestone.HasValue && milestone >= state.LastMilestone.Value ||
+                DateTime.UtcNow - state.LastNotificationUtc < LowBatteryNotificationCooldown)
                 return;
 
-            ShowBatteryNotification(activeHeadset, ToolTipIcon.Warning);
-            lastNotificationMilestone = milestone;
-            lastNotificationUtc = DateTime.UtcNow;
+            ShowBatteryNotification(headset, ToolTipIcon.Warning);
+            state.LastMilestone = milestone;
+            state.LastNotificationUtc = DateTime.UtcNow;
         }
 
         private void NotifyConnectedHeadsets()
@@ -279,10 +304,15 @@ namespace HeadsetBat
             trayIcon.ShowBalloonTip(5000, string.Empty, $"{headset.Name} — {Texts.Connected}{battery}", ToolTipIcon.Info);
         }
 
-        private void ResetLowBatteryNotification()        {
-            notificationContainerId = Guid.Empty;
-            lastNotificationMilestone = null;
-            lastNotificationUtc = DateTime.MinValue;
+        private void ResetLowBatteryNotification()
+        {
+            lowBatteryNotificationStates.Clear();
+        }
+
+        private sealed class LowBatteryNotificationState
+        {
+            public int? LastMilestone { get; set; }
+            public DateTime LastNotificationUtc { get; set; } = DateTime.MinValue;
         }
         private void SetToolTip(string text)
         {
@@ -301,7 +331,10 @@ namespace HeadsetBat
                 case "de":
                 case "es":
                 case "fr":
-                case "zh": return CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
+                case "zh":
+                case "pt":
+                case "ja":
+                case "ko": return CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
                 default: return "en";
             }
         }
@@ -314,7 +347,10 @@ namespace HeadsetBat
                 case "de": return "Deutsch";
                 case "es": return "Español";
                 case "fr": return "Français";
-                case "zh": return "中文";
+                case "zh": return "中文 (Chinese)";
+                case "pt": return "Português (Brasil)";
+                case "ja": return "日本語 (Japanese)";
+                case "ko": return "한국어 (Korean)";
                 default: return "English";
             }
         }
@@ -326,27 +362,67 @@ namespace HeadsetBat
 
             return string.Join(", ", headset.BatteryLevels.Select((value, index) => $"{Texts.Battery} {index + 1}: {value}%")) + (headset.IsCharging ? ", " + Texts.Charging : string.Empty);
         }
-        private void RebuildMenu(Headset activeHeadset, AudioOutput output)
+        private void AddDeviceMenuItem(Headset headset, bool isActive)
         {
+            var text = headset.Name + (headset.BatteryPercent.HasValue ? " — " + FormatBatteryLevels(headset) : " — " + Texts.NoBatteryInfo);
+            var isLowBattery = !headset.IsCharging && headset.BatteryPercent.HasValue && headset.BatteryPercent.Value <= lowBatteryThreshold;
+            menu.Items.Add(new ToolStripLabel((isActive ? "● " : InactiveDeviceIndent) + text)
+            {
+                ForeColor = isLowBattery ? SystemColors.Highlight : Color.Black,
+                Padding = new Padding(0, 2, 0, 2)
+            });
+        }
+
+        private string GetOtherDevicesText()
+        {
+            switch (language)
+            {
+                case "ru": return "Другие Bluetooth-устройства:";
+                case "de": return "Andere Bluetooth-Geräte:";
+                case "es": return "Otros dispositivos Bluetooth:";
+                case "fr": return "Autres appareils Bluetooth :";
+                case "zh": return "其他蓝牙设备：";
+                case "pt": return "Outros dispositivos Bluetooth:";
+                case "ja": return "その他の Bluetooth デバイス：";
+                case "ko": return "기타 Bluetooth 장치:";
+                default: return "Other Bluetooth devices:";
+            }
+        }
+
+        private string GetTrackOtherDevicesText()
+        {
+            switch (language)
+            {
+                case "ru": return "Отслеживать другие Bluetooth-устройства";
+                case "de": return "Andere Bluetooth-Geräte überwachen";
+                case "es": return "Supervisar otros dispositivos Bluetooth";
+                case "fr": return "Surveiller les autres appareils Bluetooth";
+                case "zh": return "监控其他蓝牙设备";
+                case "pt": return "Monitorar outros dispositivos Bluetooth";
+                case "ja": return "他の Bluetooth デバイスを監視";
+                case "ko": return "다른 Bluetooth 장치 모니터링";
+                default: return "Track other Bluetooth devices";
+            }
+        }
+
+        private void RebuildMenu(Headset activeHeadset, AudioOutput output)        {
             menu.Items.Clear();
             menu.Items.Add(new HeaderMenuItem("Headset Battery Monitor, v. " + BuildVersion) { Image = LogoImage, ImageScaling = ToolStripItemImageScaling.None, Font = VersionFont });
             menu.Items.Add(new ToolStripSeparator());
-            if (headsets.Count == 0)
-            {
+            var audioDevices = headsets.Where(x => x.IsAudioDevice || x == activeHeadset).ToArray();
+            var otherDevices = headsets.Where(x => !x.IsAudioDevice && x != activeHeadset).ToArray();
+            if (audioDevices.Length == 0)
                 menu.Items.Add(new ToolStripLabel(Texts.NoConnectedHeadphones) { ForeColor = Color.Black, Padding = new Padding(0, 2, 0, 2) });
-            }
             else
+                foreach (var headset in audioDevices)
+                    AddDeviceMenuItem(headset, headset == activeHeadset);
+
+            if (otherDevices.Length > 0)
             {
-                foreach (var headset in headsets)
-                {
-                    var text = headset.Name + (headset.BatteryPercent.HasValue ? " — " + FormatBatteryLevels(headset) : " — " + Texts.NoBatteryInfo);
-                    var isActive = headset == activeHeadset;
-                    menu.Items.Add(new ToolStripLabel((isActive ? "● " : InactiveDeviceIndent) + text)
-                    {
-                        ForeColor = Color.Black,
-                        Padding = new Padding(0, 2, 0, 2)
-                    });
-                }
+                menu.Items.Add(new ToolStripSeparator());
+                menu.Items.Add(new ToolStripLabel(GetOtherDevicesText()) { Enabled = false, Padding = new Padding(0, 2, 0, 2) });
+                foreach (var headset in otherDevices)
+                    AddDeviceMenuItem(headset, false);
             }
 
             menu.Items.Add(new ToolStripSeparator());
@@ -432,7 +508,7 @@ namespace HeadsetBat
                     AppSettings.SaveLowBatteryNotifications(lowBatteryNotificationsItem.Checked);
                     lowBatteryNotifications = lowBatteryNotificationsItem.Checked;
                     ResetLowBatteryNotification();
-                    UpdateLowBatteryNotification(activeHeadset);
+                    UpdateLowBatteryNotifications();
                 }
                 catch (Exception error)
                 {
@@ -441,6 +517,24 @@ namespace HeadsetBat
                 }
             };
 
+            var trackOtherDevicesItem = new ToolStripMenuItem(GetTrackOtherDevicesText()) { CheckOnClick = true, Checked = trackOtherBluetoothDevices };
+            trackOtherDevicesItem.CheckedChanged += (_, __) =>
+            {
+                if (trackOtherDevicesItem.Checked == trackOtherBluetoothDevices)
+                    return;
+
+                try
+                {
+                    AppSettings.SaveTrackOtherBluetoothDevices(trackOtherDevicesItem.Checked);
+                    trackOtherBluetoothDevices = trackOtherDevicesItem.Checked;
+                    _ = RefreshAsync();
+                }
+                catch (Exception error)
+                {
+                    trackOtherDevicesItem.Checked = trackOtherBluetoothDevices;
+                    SetToolTip("Headset Battery: " + error.Message);
+                }
+            };
             var themeItem = new ToolStripMenuItem(Texts.Theme);
             var themeItems = new List<ToolStripMenuItem>();
             foreach (var option in new[] { TrayTheme.Auto, TrayTheme.Light, TrayTheme.Dark })
@@ -466,7 +560,7 @@ namespace HeadsetBat
             { Enabled = activeHeadset?.BatteryPercent.HasValue == true };
 
             var languageItem = new ToolStripMenuItem(Texts.Language);
-            foreach (var code in new[] { "en", "ru", "de", "es", "fr", "zh" })
+            foreach (var code in new[] { "zh", "en", "fr", "de", "ja", "ko", "pt", "ru", "es" })
             {
                 var value = code;
                 var item = new ToolStripMenuItem(GetLanguageName(value)) { Checked = value == language };
@@ -505,6 +599,7 @@ dispatcher.BeginInvoke((Action)(() =>
             settingsItem.DropDownItems.Add(new ToolStripSeparator());
             settingsItem.DropDownItems.Add(thresholdItem);
             settingsItem.DropDownItems.Add(lowBatteryNotificationsItem);
+            settingsItem.DropDownItems.Add(trackOtherDevicesItem);
             settingsItem.DropDownItems.Add(testNotificationItem);
             settingsItem.DropDownItems.Add(new ToolStripSeparator());
             settingsItem.DropDownItems.Add(startWithWindowsItem);
@@ -518,6 +613,7 @@ dispatcher.BeginInvoke((Action)(() =>
         {
             refreshTimer.Stop();
             StopBluetoothWatcher();
+            StopBluetoothLeWatcher();
             audioOutputWatcher?.Dispose();
             dispatcher.Dispose();
             trayIcon.Visible = false;
@@ -611,6 +707,9 @@ dispatcher.BeginInvoke((Action)(() =>
                 case "es": return new MenuText("Configuración", "Iniciar con Windows", "Umbral de batería baja", "Notificar batería baja", "No se encontraron auriculares conectados", "sin información de batería", "Batería", "Cerrar", "Idioma", "Indicador del icono", "Relleno de color", "Porcentaje en el icono", "Notificar nivel de batería", "Notificación de prueba", "cargando", "Conectado", "Tema", "Auto", "Bandeja clara", "Bandeja oscura", "Buscar actualizaciones");
                 case "fr": return new MenuText("Paramètres", "Démarrer avec Windows", "Seuil de batterie faible", "Notifier en cas de batterie faible", "Aucun casque connecté trouvé", "aucune information sur la batterie", "Batterie", "Fermer", "Langue", "Indicateur d'icône", "Remplissage en couleur", "Pourcentage sur l'icône", "Notifier le niveau de batterie", "Notification de test", "en charge", "Connecté", "Thème", "Auto", "Zone claire", "Zone sombre", "Rechercher des mises à jour");
                 case "zh": return new MenuText("设置", "随 Windows 启动", "低电量阈值", "低电量时通知", "未找到已连接的耳机", "无电池信息", "电量", "关闭", "语言", "图标指示器", "颜色填充", "图标上的百分比", "通知电池电量", "测试通知", "充电中", "已连接", "主题", "自动", "浅色托盘", "深色托盘", "检查更新");
+                case "pt": return new MenuText("Configurações", "Iniciar com o Windows", "Limite de bateria baixa", "Notificar quando a bateria estiver baixa", "Nenhum fone de ouvido conectado encontrado", "sem informações de bateria", "Bateria", "Fechar", "Idioma", "Indicador do ícone", "Preenchimento colorido", "Porcentagem no ícone", "Notificar nível da bateria", "Notificação de teste", "carregando", "Conectado", "Tema", "Automático", "Bandeja clara", "Bandeja escura", "Verificar atualizações");
+                case "ja": return new MenuText("設定", "Windows と同時に起動", "低バッテリーしきい値", "バッテリー残量が少ないときに通知", "接続中のヘッドホンが見つかりません", "バッテリー情報なし", "バッテリー", "閉じる", "言語", "アイコン表示", "色で塗りつぶし", "アイコンに割合を表示", "バッテリー残量を通知", "テスト通知", "充電中", "接続済み", "テーマ", "自動", "明るいタスクトレイ", "暗いタスクトレイ", "更新を確認");
+                case "ko": return new MenuText("설정", "Windows와 함께 시작", "배터리 부족 기준", "배터리 부족 시 알림", "연결된 헤드폰을 찾을 수 없음", "배터리 정보 없음", "배터리", "닫기", "언어", "아이콘 표시", "색상 채우기", "아이콘에 백분율 표시", "배터리 잔량 알림", "테스트 알림", "충전 중", "연결됨", "테마", "자동", "밝은 트레이", "어두운 트레이", "업데이트 확인");
                 default: return new MenuText("Settings", "Start with Windows", "Low battery threshold", "Notify when battery is low", "Connected headphones not found", "no battery info", "Battery", "Close", "Language", "Icon indicator", "Color fill", "Percentage badge", "Notify battery level", "Test notification", "charging", "Connected", "Theme", "Auto", "Light tray", "Dark tray", "Check for updates");
             }
         }
