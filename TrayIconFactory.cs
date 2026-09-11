@@ -7,6 +7,12 @@ using Microsoft.Win32;
 
 namespace HeadsetBat
 {
+    internal enum TrayTheme
+    {
+        Auto,
+        Light,
+        Dark
+    }
     internal static class TrayIconFactory
     {
         private const string HeadphonesGlyph = "headphones";
@@ -23,6 +29,8 @@ namespace HeadsetBat
             Color.FromArgb(43, 43, 43), Color.FromArgb(96, 96, 96), Color.FromArgb(0, 91, 166),
             Color.FromArgb(0, 128, 67), Color.FromArgb(184, 34, 34), Color.FromArgb(0, 82, 153), false);
 
+        public static TrayTheme Theme { get; set; }
+
         public static Icon CreateSpeaker()
         {
             var colors = GetColors();
@@ -33,8 +41,8 @@ namespace HeadsetBat
             }, colors.StrengthenEdges);
         }
 
-        public static Icon CreateHeadphones(byte? batteryPercent, bool showPercent) => CreateGlyph(HeadphonesGlyph, batteryPercent, showPercent);
-        public static Icon CreateHeadset(byte? batteryPercent, bool showPercent) => CreateGlyph(HeadsetGlyph, batteryPercent, showPercent);
+        public static Icon CreateHeadphones(byte? batteryPercent, bool showPercent, byte lowBatteryThreshold = 30, bool isCharging = false) => CreateGlyph(HeadphonesGlyph, batteryPercent, showPercent, lowBatteryThreshold, isCharging);
+        public static Icon CreateHeadset(byte? batteryPercent, bool showPercent, byte lowBatteryThreshold = 30, bool isCharging = false) => CreateGlyph(HeadsetGlyph, batteryPercent, showPercent, lowBatteryThreshold, isCharging);
 
         public static Icon CreateNoAudioOutput()
         {
@@ -46,7 +54,7 @@ namespace HeadsetBat
             }, colors.StrengthenEdges);
         }
 
-        private static Icon CreateGlyph(string glyph, byte? batteryPercent = null, bool showPercent = false)
+        private static Icon CreateGlyph(string glyph, byte? batteryPercent = null, bool showPercent = false, byte lowBatteryThreshold = 30, bool isCharging = false)
         {
             var colors = GetColors();
             return CreateIcon(graphics =>
@@ -56,9 +64,9 @@ namespace HeadsetBat
                 {
                     DrawGlyph(graphics, glyph, showPercent && batteryPercent.HasValue ? colors.GlyphWithPercent : colors.Glyph);
                     if (batteryPercent.HasValue)
-                        DrawPercentBadge(graphics, batteryPercent.Value, colors);
+                        DrawPercentBadge(graphics, batteryPercent.Value, lowBatteryThreshold, isCharging, colors);
                 }
-                else if (batteryPercent.Value <= 30)
+                else if (!isCharging && batteryPercent.Value <= lowBatteryThreshold)
                 {
                     DrawGlyph(graphics, glyph, colors.LowBattery);
                 }
@@ -220,6 +228,11 @@ namespace HeadsetBat
 
         private static IconColors GetColors()
         {
+            if (Theme == TrayTheme.Light)
+                return LightTrayColors;
+            if (Theme == TrayTheme.Dark)
+                return DarkTrayColors;
+
             try
             {
                 using (var personalize = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"))
@@ -263,9 +276,9 @@ namespace HeadsetBat
             return glyphBottom - chargedRows + 1;
         }
 
-        private static void DrawPercentBadge(Graphics graphics, byte percent, IconColors colors)
+        private static void DrawPercentBadge(Graphics graphics, byte percent, byte lowBatteryThreshold, bool isCharging, IconColors colors)
         {
-            using (var brush = new SolidBrush(percent <= 30 ? colors.LowBattery : colors.Badge))
+            using (var brush = new SolidBrush(!isCharging && percent <= lowBatteryThreshold ? colors.LowBattery : colors.Badge))
             using (var textBrush = new SolidBrush(Color.White))
             using (var font = new Font("Segoe UI", 5.5f, FontStyle.Bold, GraphicsUnit.Pixel))
             using (var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })

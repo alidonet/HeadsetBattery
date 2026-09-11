@@ -24,6 +24,18 @@ namespace HeadsetBat
         public string Name { get; set; }
         public Guid ContainerId { get; set; }
         public byte? BatteryPercent { get; set; }
+        public bool IsCharging { get; set; }
+        public IReadOnlyList<byte> BatteryLevels { get; private set; } = Array.Empty<byte>();
+
+        public void SetBatteryLevels(IEnumerable<byte> levels)
+        {
+            var values = levels.Where(value => value <= 100).ToArray();
+            if (values.Length == 0)
+                return;
+
+            BatteryLevels = values;
+            BatteryPercent = values.Min();
+        }
 
         public static bool IsHeadset(BluetoothMinor minor) =>
             minor == BluetoothMinor.WearableHeadset ||
@@ -37,7 +49,8 @@ namespace HeadsetBat
         private static readonly string[] RequestedProperties =
         {
             "System.Devices.Aep.ContainerId",
-            "System.Devices.BatteryLife"
+            "System.Devices.BatteryLife",
+            "System.Devices.ChargingState"
         };
 
         public static async Task<IReadOnlyList<Headset>> GetConnectedAsync()
@@ -62,7 +75,8 @@ namespace HeadsetBat
                         {
                             Name = string.IsNullOrWhiteSpace(info.Name) ? device.Name : info.Name,
                             ContainerId = containerId,
-                            BatteryPercent = GetBattery(info)
+                            BatteryPercent = GetBattery(info),
+                            IsCharging = IsCharging(info)
                         });
                     }
                 }
@@ -73,11 +87,16 @@ namespace HeadsetBat
             }
 
             ApplyHfpBattery(result);
-            var missingBattery = new HashSet<Guid>(result.Where(x => !x.BatteryPercent.HasValue).Select(x => x.ContainerId));
-            var batteryByContainer = await GetBleBatteryFallbackAsync(missingBattery);
-            foreach (var headset in result.Where(x => !x.BatteryPercent.HasValue))
-                if (batteryByContainer.TryGetValue(headset.ContainerId, out var battery))
-                    headset.BatteryPercent = battery;
+            var batteryByContainer = await GetBleBatteryLevelsAsync(new HashSet<Guid>(result.Select(x => x.ContainerId)));
+            foreach (var headset in result)
+            {
+                if (!batteryByContainer.TryGetValue(headset.ContainerId, out var battery))
+                    continue;
+
+                headset.IsCharging |= battery.IsCharging;
+                if (battery.Levels.Count > 1 || !headset.BatteryPercent.HasValue)
+                    headset.SetBatteryLevels(battery.Levels);
+            }
 
             return result.OrderBy(x => x.Name).ToArray();
         }
@@ -117,9 +136,9 @@ namespace HeadsetBat
             return index >= 0 ? name.Substring(0, index).Trim() : name.Trim();
         }
 
-        private static async Task<Dictionary<Guid, byte>> GetBleBatteryFallbackAsync(ISet<Guid> requiredContainers)
+        private static async Task<Dictionary<Guid, BleBatteryInfo>> GetBleBatteryLevelsAsync(ISet<Guid> requiredContainers)
         {
-            var result = new Dictionary<Guid, byte>();
+            var result = new Dictionary<Guid, BleBatteryInfo>();
             if (requiredContainers.Count == 0)
                 return result;
 
@@ -129,12 +148,17 @@ namespace HeadsetBat
                 var devices = await DeviceInformation.FindAllAsync(selector, RequestedProperties).AsTask();
                 foreach (var info in devices)
                 {
-                    if (TryGetContainerId(info, out var containerId) && requiredContainers.Contains(containerId))
-                    {
-                        var value = GetBattery(info) ?? await ReadBleBatteryAsync(info.Id);
-                        if (value.HasValue)
-                            result[containerId] = value.Value;
-                    }
+                    if (!TryGetContainerId(info, out var containerId) || !requiredContainers.Contains(containerId))
+                        continue;
+
+                    if (!result.TryGetValue(containerId, out var battery))
+                        result[containerId] = battery = new BleBatteryInfo();
+                    battery.IsCharging |= IsCharging(info);
+
+                    var levels = await ReadBleBatteryLevelsAsync(info.Id);
+                    if (levels.Count == 0 && GetBattery(info).HasValue)
+                        levels.Add(GetBattery(info).Value);
+                    battery.Levels.AddRange(levels);
                 }
             }
             catch
@@ -145,38 +169,52 @@ namespace HeadsetBat
             return result;
         }
 
-        private static async Task<byte?> ReadBleBatteryAsync(string deviceId)
+        private sealed class BleBatteryInfo
         {
+            public List<byte> Levels { get; } = new List<byte>();
+            public bool IsCharging { get; set; }
+        }
+
+        private static async Task<List<byte>> ReadBleBatteryLevelsAsync(string deviceId)        {
+            var levels = new List<byte>();
             try
             {
                 using (var device = await BluetoothLEDevice.FromIdAsync(deviceId).AsTask())
                 {
                     if (device == null)
-                        return null;
+                        return levels;
 
                     var services = await device.GetGattServicesForUuidAsync(GattServiceUuids.Battery).AsTask();
-                    if (services.Status != GattCommunicationStatus.Success || services.Services.Count == 0)
-                        return null;
+                    if (services.Status != GattCommunicationStatus.Success)
+                        return levels;
 
-                    using (var service = services.Services[0])
+                    foreach (var service in services.Services)
+                    using (service)
                     {
                         var characteristics = await service.GetCharacteristicsForUuidAsync(GattCharacteristicUuids.BatteryLevel).AsTask();
-                        if (characteristics.Status != GattCommunicationStatus.Success || characteristics.Characteristics.Count == 0)
-                            return null;
+                        if (characteristics.Status != GattCommunicationStatus.Success)
+                            continue;
 
-                        var read = await characteristics.Characteristics[0].ReadValueAsync(BluetoothCacheMode.Cached).AsTask();
-                        if (read.Status != GattCommunicationStatus.Success || read.Value.Length == 0)
-                            return null;
-
-                        var reader = DataReader.FromBuffer(read.Value);
-                        return reader.ReadByte();
+                        foreach (var characteristic in characteristics.Characteristics)
+                        {
+                            var read = await characteristic.ReadValueAsync(BluetoothCacheMode.Cached).AsTask();
+                            if (read.Status == GattCommunicationStatus.Success && read.Value.Length > 0)
+                            {
+                                var reader = DataReader.FromBuffer(read.Value);
+                                var value = reader.ReadByte();
+                                if (value <= 100)
+                                    levels.Add(value);
+                            }
+                        }
                     }
                 }
             }
             catch
             {
-                return null;
+                // The device may not allow direct GATT access while used for audio.
             }
+
+            return levels;
         }
 
         private static bool TryGetContainerId(DeviceInformation info, out Guid id)
@@ -186,8 +224,12 @@ namespace HeadsetBat
                    (id = containerId) != Guid.Empty;
         }
 
-        private static byte? GetBattery(DeviceInformation info)
+        private static bool IsCharging(DeviceInformation info)
         {
+            return info.Properties.TryGetValue("System.Devices.ChargingState", out var value) && value is byte state && state == 1;
+        }
+
+        private static byte? GetBattery(DeviceInformation info)        {
             return info.Properties.TryGetValue("System.Devices.BatteryLife", out var value) && value is byte battery && battery <= 100
                 ? battery
                 : (byte?)null;
