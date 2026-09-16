@@ -1,49 +1,49 @@
 # Headset Battery
 
 <p align="center">
-  <img src="Assets/Logo_anim2.gif" style="max-width: 100%; height: auto; display: block;" alt="Headset Battery Monitor logo">
+  <img src="Assets/Logo_anim2.gif" style="max-width: 100%; height: auto; display: block;" alt="Headset Battery Monitor">
 </p>
 
-[Русский](README.ru.md)
+[English](README.en.md)
 
-**Headset Battery** is a compact, portable, tray-only Windows app that shows the current audio output device and, when available, the battery level of connected Bluetooth headphones or headsets.
+**Headset Battery** — компактное portable-приложение для Windows, работающее только в системном трее. Оно показывает состояние активного устройства вывода звука и, когда это возможно, уровень заряда подключённых Bluetooth-наушников или гарнитур.
 
-No installation is required: unpack the release archive and run `HeadsetBattery.exe` from any folder. Settings and the optional startup entry are stored for the current user.
+Установка не требуется: достаточно распаковать архив релиза и запустить `HeadsetBattery.exe` из любой папки. Настройки и необязательный автозапуск сохраняются для текущего пользователя.
 
-## Features
+## Возможности
 
 <p align="center">
-  <img src="Assets/live.png" alt="Headset Battery in the Windows notification area">
+  <img src="Assets/live.png" alt="Headset Battery в области уведомлений Windows">
 </p>
 
-- Detects the active Windows audio output: speakers, Bluetooth headphones, or a headset in Hands-Free mode.
-- Shows the matching tray glyph. For headphones and headsets, the glyph fill is green at a normal level and red at 30% or below.
-- Can show the exact percentage in a coloured badge instead of the fill; the option is available in Settings.
-- Lists detected connected Bluetooth audio devices, their available battery levels, and marks the active device in the context menu.
-- Optionally tracks other connected Bluetooth and BLE devices, such as mice or keyboards, when Windows exposes their battery level; they appear in a separate menu section.
-- Reads data supplied by Windows for classic HFP headsets, the system battery property, and, when available, the standard BLE Battery Service.
-- Lets you choose a low-battery threshold (40%, 30%, 20%, or 10%) and shows independent connection and low-battery notifications for each device. Charging devices do not trigger low-battery alerts.
-- Uses the Windows accent colour for devices at or below the selected threshold.
-- Offers automatic, light, and dark tray-icon themes, and opens its menu with either mouse button.
-- Saves user preferences, supports per-user startup with Windows, and permits only one running instance.
-- Localizes the menu to the Windows display language: Russian, German, Spanish, French, or Chinese; English is used as a fallback.
+- Определяет текущее устройство вывода Windows: динамики, Bluetooth-наушники или гарнитуру в режиме Hands-Free.
+- Показывает соответствующий глиф в трее. Для наушников и гарнитуры заряд отображается заполнением глифа: зелёным при нормальном уровне и красным при уровне 30% или ниже.
+- По желанию вместо заполнения показывает точный процент в цветной плашке. Переключатель находится в меню настроек.
+- В контекстном меню выводит все обнаруженные подключённые Bluetooth-аудиоустройства, их заряд и отметку у текущего устройства.
+- По желанию отслеживает другие подключённые Bluetooth- и BLE-устройства — например, мыши и клавиатуры, — если Windows передаёт для них уровень заряда. Они выводятся отдельным разделом меню.
+- Использует данные Windows для классических HFP-гарнитур, системное свойство батареи и, если доступно, стандартную службу BLE Battery Service.
+- Позволяет выбрать порог низкого заряда: 40%, 30%, 20% или 10%. Для каждого устройства отдельно работают извещения о подключении и низком заряде; при зарядке предупреждения не выводятся.
+- Выделяет устройства с зарядом на уровне или ниже порога системным акцентным цветом Windows.
+- Поддерживает автоматическую, светлую и тёмную темы иконки в трее; меню открывается обеими кнопками мыши.
+- Сохраняет пользовательские настройки, поддерживает автозапуск при входе в Windows для текущего пользователя и не допускает одновременный запуск нескольких экземпляров.
+- Переводит меню в соответствии с языком интерфейса Windows: русский, немецкий, испанский, французский или китайский; для остальных языков используется английский.
 
-## Compatibility
+## Совместимость
 
-- Windows 10 version 1709 or later, including Windows 11; both 32-bit and 64-bit editions are supported.
-- .NET Framework 4.8 is required. It is included with recent Windows 10 and Windows 11 releases; older Windows 10 versions may need the Microsoft .NET Framework 4.8 installer.
-- Windows 7 and Windows 8.1 are not supported: the Bluetooth and battery APIs used by the app are available only on Windows 10 or later.
+- Windows 10 версии 1709 или новее, включая Windows 11; поддерживаются 32- и 64-разрядные редакции.
+- Требуется .NET Framework 4.8. Он уже есть в актуальных Windows 10 и Windows 11; в более ранних версиях Windows 10 его может потребоваться установить с сайта Microsoft.
+- Windows 7 и Windows 8.1 не поддерживаются: Bluetooth API и API батареи, используемые приложением, доступны только начиная с Windows 10.
 
-## Notes
+## Важно знать
 
-Battery availability and accuracy depend on the headphones, the Bluetooth driver, and whether the device publishes battery data to Windows. If no supported source provides a value, the app still lists the device but does not show a battery level.
+Доступность и точность процента зависят от самих наушников, Bluetooth-драйвера и того, публикует ли устройство данные батареи в Windows. Если устройство не предоставляет их ни одним из доступных способов, приложение по-прежнему показывает его в меню, но без уровня заряда.
 
-## Building from source
+## Сборка из исходного кода
 
-This section is only needed if you want to build the app yourself or modify its source code.
+Этот раздел нужен только для самостоятельной сборки приложения или доработки его исходного кода.
 
-The project targets Visual Studio 2019 and .NET Framework 4.8.
+Проект рассчитан на Visual Studio 2019 и .NET Framework 4.8.
 
-1. Open `HeadsetBat.csproj`.
-2. Restore the `Microsoft.Windows.SDK.Contracts` package.
-3. Build the solution. The executable is created at `bin\Debug\net48\win-x86\HeadsetBattery.exe`.
+1. Откройте `HeadsetBat.csproj`.
+2. Восстановите пакет `Microsoft.Windows.SDK.Contracts`.
+3. Соберите решение. После сборки приложение находится в `bin\Debug\net48\win-x86\HeadsetBattery.exe`.

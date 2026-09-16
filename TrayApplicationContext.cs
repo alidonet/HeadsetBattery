@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using Windows.Devices.Enumeration;
@@ -12,7 +13,7 @@ namespace HeadsetBat
 {
     internal sealed class TrayApplicationContext : ApplicationContext
     {
-        private const string BuildVersion = "1.1.0";
+        private const string BuildVersion = "1.1.01";
         private const string InactiveDeviceIndent = "\u00A0\u00A0\u00A0\u00A0";
         private static readonly TimeSpan LowBatteryNotificationCooldown = TimeSpan.FromMinutes(3);
         private static readonly Font VersionFont = new Font(SystemFonts.MenuFont, FontStyle.Bold);
@@ -26,12 +27,13 @@ namespace HeadsetBat
         private readonly ContextMenuStrip menu = new ContextMenuStrip { AutoClose = true, Renderer = new HeaderMenuRenderer() };
         private readonly Control dispatcher = new Control();
         private readonly Timer refreshTimer = new Timer { Interval = 60000 };
+        private readonly Timer manualMenuCloseTimer = new Timer { Interval = 50 };
+        private bool mouseButtonsWereDown;
         private AudioOutputWatcher audioOutputWatcher;
         private DeviceWatcher bluetoothWatcher;
         private DeviceWatcher bluetoothLeWatcher;
         private bool refreshing;
         private bool refreshRequested;
-        private bool suppressNextMenuOpening;
         private bool showBatteryPercent = AppSettings.LoadShowBatteryPercentage();
         private bool startWithWindows = AppSettings.IsStartWithWindowsEnabled();
         private byte lowBatteryThreshold = AppSettings.LoadLowBatteryThreshold();
@@ -54,22 +56,9 @@ namespace HeadsetBat
                 Icon = TrayIconFactory.CreateSpeaker()
             };
             dispatcher.CreateControl();
-            menu.Opening += (_, args) =>
-            {
-                if (!suppressNextMenuOpening)
-                    return;
-
-                suppressNextMenuOpening = false;
-                args.Cancel = true;
-            };
-            trayIcon.MouseDown += (_, args) =>
-            {
-                if (args.Button == MouseButtons.Right && menu.Visible)
-                {
-                    suppressNextMenuOpening = true;
-                    menu.Close();
-                }
-            };
+            manualMenuCloseTimer.Tick += (_, __) => CheckManualMenuClose();
+            manualMenuCloseTimer.Start();
+            menu.Opened += (_, __) => mouseButtonsWereDown = false;
             trayIcon.MouseUp += (_, args) =>
             {
                 if (args.Button != MouseButtons.Left)
@@ -283,7 +272,7 @@ namespace HeadsetBat
         {
             var current = new HashSet<Guid>(headsets.Where(x => x.ContainerId != Guid.Empty).Select(x => x.ContainerId));
             if (connectedHeadsetsKnown && lowBatteryNotifications)
-                foreach (var headset in headsets.Where(x => current.Contains(x.ContainerId) && !connectedHeadsetIds.Contains(x.ContainerId) && !x.IsCharging))
+                foreach (var headset in headsets.Where(x => current.Contains(x.ContainerId) && !connectedHeadsetIds.Contains(x.ContainerId) && !x.IsCharging && x.BatteryPercent.HasValue && x.BatteryPercent.Value <= lowBatteryThreshold))
                     ShowConnectionNotification(headset);
 
             connectedHeadsetIds.Clear();
@@ -579,7 +568,7 @@ namespace HeadsetBat
                         RebuildMenu(activeHeadset, output);
 dispatcher.BeginInvoke((Action)(() =>
                         {
-                            menu.Show(location);
+                            menu.Show(dispatcher, dispatcher.PointToClient(location));
                             var settings = menu.Items.OfType<ToolStripMenuItem>().First(x => x.Text == Texts.Settings);
                             settings.ShowDropDown();
                             settings.DropDownItems.OfType<ToolStripMenuItem>().First(x => x.Text == Texts.Language).ShowDropDown();
@@ -609,9 +598,37 @@ dispatcher.BeginInvoke((Action)(() =>
             menu.Items.Add(new ToolStripMenuItem(Texts.Exit, CloseImage, (_, __) => ExitThread()) { ImageScaling = ToolStripItemImageScaling.None });
         }
 
+        private void CheckManualMenuClose()
+        {
+            var buttonsDown = (GetAsyncKeyState(0x01) & 0x8000) != 0 ||
+                              (GetAsyncKeyState(0x02) & 0x8000) != 0 ||
+                              (GetAsyncKeyState(0x04) & 0x8000) != 0;
+            if (menu.Visible && buttonsDown && !mouseButtonsWereDown && !IsMenuPoint(Cursor.Position))
+                menu.Close();
+            mouseButtonsWereDown = buttonsDown;
+        }
+
+        private bool IsMenuPoint(Point point)
+        {
+            if (menu.Bounds.Contains(point))
+                return true;
+            return menu.Items.OfType<ToolStripMenuItem>().Any(item => IsMenuItemPoint(item, point));
+        }
+
+        private static bool IsMenuItemPoint(ToolStripMenuItem item, Point point)
+        {
+            if (!item.DropDown.Visible)
+                return false;
+            return item.DropDown.Bounds.Contains(point) ||
+                   item.DropDown.Items.OfType<ToolStripMenuItem>().Any(child => IsMenuItemPoint(child, point));
+        }
+        [DllImport("user32.dll")]
+        private static extern short GetAsyncKeyState(int virtualKey);
+
         protected override void ExitThreadCore()
         {
             refreshTimer.Stop();
+            manualMenuCloseTimer.Stop();
             StopBluetoothWatcher();
             StopBluetoothLeWatcher();
             audioOutputWatcher?.Dispose();
@@ -621,6 +638,7 @@ dispatcher.BeginInvoke((Action)(() =>
             trayIcon.Dispose();
             menu.Dispose();
             refreshTimer.Dispose();
+            manualMenuCloseTimer.Dispose();
             base.ExitThreadCore();
         }
     }
