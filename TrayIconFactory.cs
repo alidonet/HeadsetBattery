@@ -19,8 +19,10 @@ namespace HeadsetBat
         private const string HeadsetGlyph = "headset";
         private const string SpeakerGlyph = "volume-2";
         private const string HeadphoneOffGlyph = "headphone-off";
-        private const int HeadphonesBottom = 15;
-        private const int HeadsetBottom = 15;
+        private const int HeadphonesTop = 3;
+        private const int HeadphonesBottom = 13;
+        private const int HeadsetTop = 2;
+        private const int HeadsetBottom = 14;
         private const float GlyphStrokeWidth = 1.4f;
         private static readonly IconColors DarkTrayColors = new IconColors(
             Color.FromArgb(248, 241, 227), Color.FromArgb(248, 241, 227), Color.FromArgb(90, 200, 250),
@@ -76,8 +78,10 @@ namespace HeadsetBat
                     var state = graphics.Save();
                     try
                     {
+                        var glyphTop = glyph == HeadphonesGlyph ? HeadphonesTop : HeadsetTop;
                         var glyphBottom = glyph == HeadphonesGlyph ? HeadphonesBottom : HeadsetBottom;
-                        var chargedTop = GetChargedTop(glyphBottom, batteryPercent.Value);
+                        var fillPercent = isCharging ? batteryPercent.Value : GetScaledFillPercent(batteryPercent.Value, lowBatteryThreshold);
+                        var chargedTop = GetChargedTop(glyphTop, glyphBottom, fillPercent);
                         graphics.SetClip(new Rectangle(0, chargedTop, 16, glyphBottom - chargedTop + 1));
                         DrawGlyph(graphics, glyph, colors.Charged);
                     }
@@ -269,9 +273,17 @@ namespace HeadsetBat
             public bool StrengthenEdges { get; }
         }
 
-        private static int GetChargedTop(int glyphBottom, byte percent)
+        private static byte GetScaledFillPercent(byte batteryPercent, byte lowBatteryThreshold)
         {
-            var rows = glyphBottom + 1;
+            var minimumPercent = Math.Max(0, (int)lowBatteryThreshold - 10);
+            if (batteryPercent >= 100 || batteryPercent <= minimumPercent)
+                return batteryPercent >= 100 ? (byte)100 : (byte)0;
+
+            return (byte)Math.Floor((batteryPercent - minimumPercent) * 100.0 / (100 - minimumPercent));
+        }
+        private static int GetChargedTop(int glyphTop, int glyphBottom, byte percent)
+        {
+            var rows = glyphBottom - glyphTop + 1;
             var chargedRows = (int)Math.Ceiling(percent * rows / 100.0);
             return glyphBottom - chargedRows + 1;
         }
