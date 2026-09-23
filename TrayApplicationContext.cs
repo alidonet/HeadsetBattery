@@ -13,7 +13,7 @@ namespace HeadsetBat
 {
     internal sealed class TrayApplicationContext : ApplicationContext
     {
-        private const string BuildVersion = "1.1.02";
+        private const string BuildVersion = "1.1.03";
         private const string InactiveDeviceIndent = "\u00A0\u00A0\u00A0\u00A0";
         private static readonly TimeSpan LowBatteryNotificationCooldown = TimeSpan.FromMinutes(3);
         private static readonly Font VersionFont = new Font(SystemFonts.MenuFont, FontStyle.Bold);
@@ -99,7 +99,7 @@ namespace HeadsetBat
                 {
                     output = AudioEndpoint.GetDefaultRender();
                     audioOutputKnown = true;
-                    headsets = await BluetoothHeadsets.GetConnectedAsync(trackOtherBluetoothDevices);
+                    headsets = await GetConnectedHeadsetsAsync();
                     NotifyConnectedHeadsets();
                     UpdateLowBatteryNotifications();
                     var activeHeadset = output == null ? null : headsets.FirstOrDefault(x => x.ContainerId == output.ContainerId);
@@ -121,6 +121,19 @@ namespace HeadsetBat
             while (refreshRequested);
         }
 
+        private async Task<IReadOnlyList<Headset>> GetConnectedHeadsetsAsync()
+        {
+            var current = await BluetoothHeadsets.GetConnectedAsync(trackOtherBluetoothDevices);
+            var currentIds = new HashSet<Guid>(current.Where(x => x.ContainerId != Guid.Empty).Select(x => x.ContainerId));
+            var hasNewDevice = !connectedHeadsetsKnown || currentIds.Any(x => !connectedHeadsetIds.Contains(x));
+            if (hasNewDevice)
+            {
+                await Task.Delay(1500);
+                current = await BluetoothHeadsets.GetConnectedAsync(trackOtherBluetoothDevices);
+            }
+
+            return current;
+        }
         private void StartSystemWatchers()
         {
             try

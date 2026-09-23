@@ -81,9 +81,16 @@ namespace HeadsetBat
                         var glyphTop = glyph == HeadphonesGlyph ? HeadphonesTop : HeadsetTop;
                         var glyphBottom = glyph == HeadphonesGlyph ? HeadphonesBottom : HeadsetBottom;
                         var fillPercent = isCharging ? batteryPercent.Value : GetScaledFillPercent(batteryPercent.Value, lowBatteryThreshold);
-                        var chargedTop = GetChargedTop(glyphTop, glyphBottom, fillPercent);
-                        graphics.SetClip(new Rectangle(0, chargedTop, 16, glyphBottom - chargedTop + 1));
-                        DrawGlyph(graphics, glyph, colors.Charged);
+                        if (fillPercent >= 100)
+                        {
+                            DrawGlyph(graphics, glyph, colors.Charged);
+                        }
+                        else
+                        {
+                            var chargedTop = GetChargedTop(glyphTop, glyphBottom, fillPercent);
+                            graphics.SetClip(new Rectangle(0, chargedTop, 16, glyphBottom - chargedTop + 1));
+                            DrawGlyph(graphics, glyph, colors.Charged);
+                        }
                     }
                     finally
                     {
@@ -283,6 +290,9 @@ namespace HeadsetBat
         }
         private static int GetChargedTop(int glyphTop, int glyphBottom, byte percent)
         {
+            if (percent >= 100)
+                return 0;
+
             var rows = glyphBottom - glyphTop + 1;
             var chargedRows = (int)Math.Ceiling(percent * rows / 100.0);
             return glyphBottom - chargedRows + 1;
