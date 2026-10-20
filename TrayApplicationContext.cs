@@ -13,7 +13,7 @@ namespace HeadsetBat
 {
     internal sealed class TrayApplicationContext : ApplicationContext
     {
-        private const string BuildVersion = "1.1.03";
+        private const string BuildVersion = "1.1.04";
         private const string InactiveDeviceIndent = "\u00A0\u00A0\u00A0\u00A0";
         private static readonly TimeSpan LowBatteryNotificationCooldown = TimeSpan.FromMinutes(3);
         private static readonly Font VersionFont = new Font(SystemFonts.MenuFont, FontStyle.Bold);

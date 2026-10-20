@@ -24,12 +24,13 @@ namespace HeadsetBat
         private const int HeadsetTop = 2;
         private const int HeadsetBottom = 14;
         private const float GlyphStrokeWidth = 1.4f;
+        private const bool LightTrayShadowEnabled = true;
         private static readonly IconColors DarkTrayColors = new IconColors(
             Color.FromArgb(248, 241, 227), Color.FromArgb(248, 241, 227), Color.FromArgb(90, 200, 250),
             Color.FromArgb(0, 230, 118), Color.FromArgb(255, 59, 48), Color.FromArgb(0, 120, 212), true);
         private static readonly IconColors LightTrayColors = new IconColors(
-            Color.FromArgb(43, 43, 43), Color.FromArgb(96, 96, 96), Color.FromArgb(0, 91, 166),
-            Color.FromArgb(0, 128, 67), Color.FromArgb(184, 34, 34), Color.FromArgb(0, 82, 153), false);
+            Color.White, Color.FromArgb(96, 96, 96), Color.FromArgb(0, 91, 166),
+            Color.FromArgb(0, 155, 99), Color.FromArgb(184, 34, 34), Color.FromArgb(0, 82, 153), false);
 
         public static TrayTheme Theme { get; set; }
 
@@ -74,13 +75,16 @@ namespace HeadsetBat
                 }
                 else
                 {
-                    DrawGlyph(graphics, glyph, colors.Glyph);
+                    var glyphTop = glyph == HeadphonesGlyph ? HeadphonesTop : HeadsetTop;
+                    var glyphBottom = glyph == HeadphonesGlyph ? HeadphonesBottom : HeadsetBottom;
+                    var fillPercent = isCharging ? batteryPercent.Value : GetScaledFillPercent(batteryPercent.Value, lowBatteryThreshold);
+                    if (fillPercent < 100)
+                        DrawGlyphWithLightTrayShadow(graphics, glyph, colors.Glyph);
+                    else
+                        DrawGlyph(graphics, glyph, colors.Glyph);
                     var state = graphics.Save();
                     try
                     {
-                        var glyphTop = glyph == HeadphonesGlyph ? HeadphonesTop : HeadsetTop;
-                        var glyphBottom = glyph == HeadphonesGlyph ? HeadphonesBottom : HeadsetBottom;
-                        var fillPercent = isCharging ? batteryPercent.Value : GetScaledFillPercent(batteryPercent.Value, lowBatteryThreshold);
                         if (fillPercent >= 100)
                         {
                             DrawGlyph(graphics, glyph, colors.Charged);
@@ -98,6 +102,25 @@ namespace HeadsetBat
                     }
                 }
             }, colors.StrengthenEdges);
+        }
+
+        private static void DrawGlyphWithLightTrayShadow(Graphics graphics, string glyph, Color color)
+        {
+            if (LightTrayShadowEnabled && color == Color.White)
+            {
+                var state = graphics.Save();
+                try
+                {
+                    graphics.TranslateTransform(0.5f, 0.5f);
+                    DrawGlyph(graphics, glyph, Color.FromArgb(160, 96, 96, 96));
+                }
+                finally
+                {
+                    graphics.Restore(state);
+                }
+            }
+
+            DrawGlyph(graphics, glyph, color);
         }
 
         private static void DrawGlyph(Graphics graphics, string glyph, Color color)
